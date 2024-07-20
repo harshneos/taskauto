@@ -1,0 +1,68 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-south-1
+      EC2_USER: ec2-user
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Install SSH key
+      run: |
+        echo "${SSH_PRIVATE_KEY}" > /tmp/ssh_key
+        chmod 600 /tmp/ssh_key
+        eval $(ssh-agent -s)
+        ssh-add /tmp/ssh_key
+        ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
+
+    - name: Install AWS CLI
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y awscli
+
+    - name: Configure AWS CLI
+      run: |
+        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+        aws configure set default.region $AWS_REGION
+
+    - name: Install Nginx on EC2
+      run: |
+        ssh -i /tmp/ssh_key $EC2_USER@$EC2_HOST << EOF
+          sudo yum update -y
+          sudo amazon-linux-extras install nginx1.12 -y
+          sudo systemctl start nginx
+        EOF
+
+    - name: Install Git on EC2
+      run: |
+        ssh -i /tmp/ssh_key $EC2_USER@$EC2_HOST << EOF
+          sudo yum install git -y
+        EOF
+
+    - name: Clone repository on EC2
+      run: |
+        ssh -i /tmp/ssh_key $EC2_USER@$EC2_HOST << EOF
+          git clone git@github.com:harshneos/taskauto.git
+          cd taskauto
+          echo "<h1>Hello, World!</h1>" > index.html
+        EOF
+
+    - name: Deploy to Nginx
+      run: |
+        ssh -i /tmp/ssh_key $EC2_USER@$EC2_HOST << EOF
+          sudo cp taskauto/index.html /usr/share/nginx/html/index.html
+        EOF
